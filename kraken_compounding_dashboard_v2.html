@@ -1,0 +1,495 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kraken Personal — Compounding to $1M (Dashboard v2)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Tracker dashboard for compounding a $25,000 account to $1,000,000 at ~1% net per iteration." />
+  <style>
+    .card { @apply bg-white rounded-2xl shadow-sm border border-gray-200; }
+    .metric { @apply text-gray-500 text-sm; }
+    .value { @apply text-gray-900 font-semibold text-xl; }
+    .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700; }
+    .table-head { @apply text-left text-xs font-semibold text-gray-500 uppercase tracking-wide; }
+    .table-cell { @apply whitespace-nowrap px-3 py-2 text-sm text-gray-900; }
+    .nowrap { white-space: nowrap; }
+    details[open] summary .chev { transform: rotate(90deg); }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+  <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight">Kraken Personal — Compounding to $1M</h1>
+        <p class="text-gray-600 mt-1">Goal: ~1% net per iteration (fees: 0.12% buy + 0.12% sell ⇒ ~0.24% round-trip; aim ~1.24% gross).</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="downloadJson" class="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium">Download JSON</button>
+        <button id="downloadCsv" class="px-3 py-2 rounded-lg bg-white border text-gray-900 text-sm font-medium">Download CSV</button>
+      </div>
+    </header>
+
+    <!-- KPI Cards -->
+    <section id="kpis" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></section>
+
+    <!-- Progress Cards -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div class="card p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="metric">Current Iteration — Net Progress</div>
+            <div class="value" id="netProgressValue">—</div>
+          </div>
+          <span class="badge">Target +1.00% net</span>
+        </div>
+        <div class="mt-3 w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+          <div id="netProgressBar" class="h-3 bg-gray-900 rounded-full" style="width:0%"></div>
+        </div>
+        <p class="text-sm text-gray-600 mt-2" id="netProgressHelp"></p>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="metric">Current Iteration — Capital Allocation</div>
+            <div class="value" id="allocationValue">—</div>
+          </div>
+          <span class="badge" id="expectedBadge">Pool —</span>
+        </div>
+        <div class="mt-3 w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+          <div id="allocationBar" class="h-3 bg-gray-900 rounded-full" style="width:0%"></div>
+        </div>
+        <p class="text-sm text-gray-600 mt-2" id="allocationHelp"></p>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div class="card p-4 lg:col-span-2">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Iteration Summary</h2>
+          <span class="badge">Auto-calculated</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="table-head px-3 py-2">Iteration #</th>
+                <th class="table-head px-3 py-2">Expected Amount to Invest</th>
+                <th class="table-head px-3 py-2">Expected Net Required (1%)</th>
+                <th class="table-head px-3 py-2">Remaining to Invest</th>
+                <th class="table-head px-3 py-2">Actual (Net)</th>
+                <th class="table-head px-3 py-2">Time Frame</th>
+                <th class="table-head px-3 py-2">Tokens</th>
+              </tr>
+            </thead>
+            <tbody id="iterationsTable" class="divide-y divide-gray-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <h2 class="text-lg font-semibold">Derived (Current Iteration)</h2>
+            <p class="text-sm text-gray-600">Updated as trades are added.</p>
+          </div>
+          <div class="text-right">
+            <button id="finalizeBtn" class="px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium disabled:opacity-40" disabled>Finalize Iteration</button>
+            <p class="text-xs text-gray-500 mt-1">Enabled when Remaining ≤ 0</p>
+          </div>
+        </div>
+        <ul class="text-sm space-y-1" id="derivedList"></ul>
+      </div>
+    </div>
+
+    <div class="card p-4 mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-semibold">Current Iteration — Trades Log</h2>
+        <div class="flex gap-2 items-center">
+          <input id="search" type="text" placeholder="Search token…" class="px-3 py-2 rounded-lg border w-40 text-sm" />
+          <span class="badge" id="tradeCount">0 trades</span>
+        </div>
+      </div>
+      <div class="overflow-x-auto mb-4">
+        <table class="min-w-full">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="table-head px-3 py-2">Timestamp (ET)</th>
+              <th class="table-head px-3 py-2">Token</th>
+              <th class="table-head px-3 py-2">Invested ($)</th>
+              <th class="table-head px-3 py-2">Profit (Net $)</th>
+              <th class="table-head px-3 py-2">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTable" class="divide-y divide-gray-100 bg-white"></tbody>
+        </table>
+      </div>
+
+      <!-- ADD / PASTE FORM -->
+      <details class="mt-2">
+        <summary class="flex items-center gap-2 cursor-pointer select-none">
+          <svg class="chev transition h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 0 1-.02-1.06L10.93 10 7.2 6.29a.75.75 0 1 1 1.06-1.06l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.05-.02Z" clip-rule="evenodd"/></svg>
+          <span class="font-medium">Add trade (paste or type)</span>
+          <span class="badge">Records to your browser</span>
+        </summary>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Paste summary</label>
+            <textarea id="pasteInput" rows="6" class="w-full rounded-lg border p-2 text-sm" placeholder="Example:
+SUI trade summary (single buy → single sell):
+Invested Amount: $1,000.00
+Sell Amount: $1,012.04
+Profit: $12.04
+Sell Timestamp: Aug 18, 2025, 6:05 PM"></textarea>
+            <div class="flex gap-2 mt-2">
+              <button id="parseBtn" class="px-3 py-2 rounded-lg bg-white border text-gray-900 text-sm font-medium">Parse</button>
+              <button id="clearPasteBtn" class="px-3 py-2 rounded-lg bg-white border text-gray-900 text-sm">Clear</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">Hints: Token can be inferred from the header (e.g., “SUI trade summary”) or set below.</p>
+          </div>
+
+          <div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Token</label>
+                <input id="token" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="e.g., SUI" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Timestamp (ET)</label>
+                <input id="timestamp" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="8/18/25 6:05 PM" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Invested ($)</label>
+                <input id="invested" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="1000.00" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Sell Amount ($)</label>
+                <input id="sellAmount" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="1012.04 (optional if Profit given)" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Profit (Net $)</label>
+                <input id="profit" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="12.04 (optional; computed if Sell - Invested)" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <input id="notes" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="—" />
+              </div>
+            </div>
+            <div class="flex items-center justify-between mt-3">
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input id="persistToggle" type="checkbox" class="rounded" checked /> Save to this browser (localStorage)
+              </label>
+              <button id="addTradeBtn" class="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium">Add Trade</button>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <footer class="text-xs text-gray-500 mt-8">
+      <p><strong>Hosting:</strong> Save this file to a GitHub repo and enable GitHub Pages, or deploy to Netlify/Vercel. It’s a static site — data can be edited inline or pulled from hosted JSON, and new trades can be recorded locally in your browser.</p>
+      <p class="mt-1"><strong>Reset:</strong> To wipe locally recorded trades/iterations, open DevTools → Application → Local Storage → clear key <code>compoundingDashboardState</code>.</p>
+    </footer>
+  </div>
+
+  <!-- DATA SOURCE (initial) -->
+  <script type="application/json" id="iterations-json">[
+    {
+      "iteration": 4,
+      "expected": 26054.72,
+      "expectedNet": 260.55,
+      "remainingInvest": 8701.56,
+      "actualNet": 201.61,
+      "timeFrame": "8/15/25 6:49 PM – 8/18/25 6:05 PM",
+      "tokens": "AVAX, FARTCOIN, PENGU, OP, ATOM, SUI, SOL, ADA, ARB (partial)"
+    },
+    {
+      "iteration": 3,
+      "expected": 25558.39,
+      "expectedNet": 255.58,
+      "remainingInvest": 0.00,
+      "actualNet": 496.33,
+      "timeFrame": "8/13/25 8:00 PM – 8/15/25 8:32 PM",
+      "tokens": "TON, XRP, SOL, ADA, LTC, TAO, FARTCOIN"
+    },
+    {
+      "iteration": 2,
+      "expected": 25252.46,
+      "expectedNet": 252.52,
+      "remainingInvest": 0.00,
+      "actualNet": 305.93,
+      "timeFrame": "8/13/25 8:00 PM – 8/13/25 11:30 PM",
+      "tokens": "AVAX, TAO, PEPE, SUI, SOL, XTZ, FARTCOIN, BTC"
+    },
+    {
+      "iteration": 1,
+      "expected": 25000.00,
+      "expectedNet": 250.00,
+      "remainingInvest": 0.00,
+      "actualNet": 252.46,
+      "timeFrame": "8/12/25 3:06 PM – 8/13/25 12:00 PM",
+      "tokens": "SOL, AVAX, ARB, UNI, LDO, PEPE, ADA, LTC"
+    }
+  ]</script>
+
+  <script type="application/json" id="trades-json">[
+    { "timestamp": "8/18/25 5:58 PM", "token": "ARB", "invested": 3007.05, "profit": 38.51, "notes": "—" },
+    { "timestamp": "8/18/25 6:05 PM", "token": "SUI", "invested": 1000.00, "profit": 12.04, "notes": "latest trade" }
+  ]</script>
+
+  <script>
+    const FEES_ROUND_TRIP = 0.24; // %
+    const LS_KEY = "compoundingDashboardState";
+
+    const $ = (sel) => document.querySelector(sel);
+    const fmtUSD = (n) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+    const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+    function parseNumber(x) {
+      if (x === undefined || x === null) return NaN;
+      if (typeof x === "number") return x;
+      return parseFloat(String(x).replace(/[$,%\s,]/g, ""));
+    }
+
+    function loadInitialData() {
+      try {
+        const fromLS = localStorage.getItem(LS_KEY);
+        if (fromLS) return JSON.parse(fromLS);
+      } catch {}
+      const iters = JSON.parse(document.getElementById("iterations-json").textContent);
+      const trades = JSON.parse(document.getElementById("trades-json").textContent);
+      return { iterations: iters, trades };
+    }
+
+    function saveState(state) {
+      try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch {}
+    }
+
+    // STATE
+    const state = loadInitialData();
+    state.iterations.sort((a,b) => b.iteration - a.iteration);
+    const currentIter = () => state.iterations[0];
+
+    function renderKPIs() {
+      const cur = currentIter();
+      const kpis = [
+        { label: "Current Iteration", value: "#" + cur.iteration, hint: cur.timeFrame || "—" },
+        { label: "Expected Amount to Invest", value: fmtUSD(cur.expected), hint: "Pool this iteration" },
+        { label: "Actual (Net) So Far", value: fmtUSD(cur.actualNet), hint: "Net gains this iteration" },
+        { label: "Remaining to Invest", value: fmtUSD(cur.remainingInvest), hint: "Allocation left" }
+      ];
+      document.getElementById("kpis").innerHTML = kpis.map(k => `
+        <div class="card p-4">
+          <div class="metric">${k.label}</div>
+          <div class="value mt-1">${k.value}</div>
+          <div class="text-xs text-gray-500 mt-1">${k.hint || ""}</div>
+        </div>
+      `).join("");
+      document.getElementById("expectedBadge").textContent = "Pool " + fmtUSD(cur.expected);
+    }
+
+    function renderIterationsTable() {
+      const rows = state.iterations.map(r => `
+        <tr>
+          <td class="table-cell font-medium">#${r.iteration}</td>
+          <td class="table-cell">${fmtUSD(r.expected)}</td>
+          <td class="table-cell">${fmtUSD(r.expectedNet)}</td>
+          <td class="table-cell">${fmtUSD(r.remainingInvest)}</td>
+          <td class="table-cell">${fmtUSD(r.actualNet)}${r.iteration === currentIter().iteration ? ' <span class="text-xs text-gray-500">(partial)</span>' : ''}</td>
+          <td class="table-cell">${r.timeFrame || "—"}</td>
+          <td class="table-cell">${r.tokens || ""}</td>
+        </tr>
+      `).join("");
+      document.getElementById("iterationsTable").innerHTML = rows;
+    }
+
+    function renderDerived() {
+      const cur = currentIter();
+      const remainingNet = +(cur.expectedNet - cur.actualNet).toFixed(2);
+      const pctAchieved = clamp((cur.actualNet / cur.expectedNet) * 100, 0, 100);
+      const capitalAllocated = +(cur.expected - cur.remainingInvest).toFixed(2);
+      const allocPct = clamp((capitalAllocated / cur.expected) * 100, 0, 100);
+      const netNeededPct = cur.remainingInvest > 0 ? (remainingNet / cur.remainingInvest) * 100 : 0;
+      const grossNeededPct = netNeededPct + FEES_ROUND_TRIP;
+
+      document.getElementById("netProgressValue").textContent = pctAchieved.toFixed(1) + "% of +" + fmtUSD(cur.expectedNet) + " target";
+      document.getElementById("netProgressBar").style.width = pctAchieved + "%";
+      document.getElementById("netProgressHelp").textContent = "Actual (Net): " + fmtUSD(cur.actualNet) + " • Remaining net: " + fmtUSD(remainingNet);
+
+      document.getElementById("allocationValue").textContent = allocPct.toFixed(1) + "% allocated";
+      document.getElementById("allocationBar").style.width = allocPct + "%";
+      document.getElementById("allocationHelp").textContent = "Allocated: " + fmtUSD(capitalAllocated) + " • Remaining: " + fmtUSD(cur.remainingInvest);
+
+      document.getElementById("derivedList").innerHTML = `
+        <li>Remaining net to 1% target: <strong>${fmtUSD(remainingNet)}</strong></li>
+        <li>% of net target achieved: <strong>${pctAchieved.toFixed(1)}%</strong></li>
+        <li>Capital invested so far this iteration: <strong>${fmtUSD(capitalAllocated)}</strong></li>
+        <li>Running equity (if closed now): <strong>${fmtUSD(25000 + 252.46 + 305.93 + 496.33 + cur.actualNet)}</strong></li>
+        <li>Net needed on remaining capital: <strong>${netNeededPct.toFixed(2)}%</strong> (≈ <strong>${grossNeededPct.toFixed(2)}% gross</strong> incl. fees)</li>
+      `;
+
+      document.getElementById("finalizeBtn").disabled = cur.remainingInvest > 0;
+    }
+
+    function renderTrades(filterTerm="") {
+      const term = (filterTerm || "").trim().toLowerCase();
+      const filtered = term ? state.trades.filter(t => (t.token||"").toLowerCase().includes(term)) : state.trades;
+      document.getElementById("tradeCount").textContent = filtered.length + (filtered.length === 1 ? " trade" : " trades");
+      document.getElementById("tradesTable").innerHTML = filtered.map(t => `
+        <tr>
+          <td class="table-cell">${t.timestamp}</td>
+          <td class="table-cell font-medium">${t.token}</td>
+          <td class="table-cell">${fmtUSD(t.invested)}</td>
+          <td class="table-cell">${fmtUSD(t.profit)}</td>
+          <td class="table-cell">${t.notes || "—"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function refreshAll() {
+      renderKPIs();
+      renderIterationsTable();
+      renderDerived();
+      renderTrades(document.getElementById("search").value || "");
+    }
+
+    function parsePastedSummary(text) {
+      const out = { token: "", timestamp: "", invested: "", sellAmount: "", profit: "", notes: "" };
+      if (!text) return out;
+      const mHeader = text.match(/^\s*([A-Z0-9.\-_/]+)\s+trade summary/i);
+      const mToken = text.match(/Token\s*:\s*([A-Za-z0-9.\-_/]+)/i);
+      out.token = (mToken && mToken[1]) || (mHeader && mHeader[1]) || "";
+      const mInv = text.match(/Invested\s*Amount\s*:\s*\$?([\d,]+(?:\.\d{1,2})?)/i);
+      if (mInv) out.invested = mInv[1];
+      const mSell = text.match(/Sell\s*Amount\s*:\s*\$?([\d,]+(?:\.\d{1,2})?)/i);
+      if (mSell) out.sellAmount = mSell[1];
+      const mP = text.match(/Profit\s*:\s*\$?([\d,]+(?:\.\d{1,2})?)/i);
+      if (mP) out.profit = mP[1];
+      const mTs1 = text.match(/Sell\s*Timestamp\s*:\s*([^\n]+)/i);
+      const mTs2 = text.match(/Timestamp\s*:\s*([^\n]+)/i);
+      out.timestamp = (mTs1 && mTs1[1].trim()) || (mTs2 && mTs2[1].trim()) || "";
+      return out;
+    }
+
+    function fillForm(fields) {
+      if (!fields) return;
+      document.getElementById("token").value = fields.token || "";
+      document.getElementById("timestamp").value = fields.timestamp || "";
+      document.getElementById("invested").value = fields.invested || "";
+      document.getElementById("sellAmount").value = fields.sellAmount || "";
+      document.getElementById("profit").value = fields.profit || "";
+      document.getElementById("notes").value = fields.notes || "";
+    }
+
+    function updateCurrentIterationWithTrade(trade) {
+      const cur = currentIter();
+      const tokenList = (cur.tokens || "").split(",").map(s => s.trim()).filter(Boolean);
+      if (trade.token && !tokenList.map(s => s.toUpperCase()).includes(trade.token.toUpperCase())) {
+        tokenList.push(trade.token);
+      }
+      cur.tokens = tokenList.join(", ");
+      const parts = (cur.timeFrame || "").split("–");
+      const start = parts.length ? parts[0].trim() : "";
+      cur.timeFrame = start ? (start + " – " + trade.timestamp) : ("—" + " – " + trade.timestamp);
+      cur.remainingInvest = +(cur.remainingInvest - trade.invested).toFixed(2);
+      cur.actualNet = +(cur.actualNet + trade.profit).toFixed(2);
+    }
+
+    function addTradeFromForm() {
+      const token = document.getElementById("token").value.trim();
+      const timestamp = document.getElementById("timestamp").value.trim();
+      const invested = parseNumber(document.getElementById("invested").value);
+      const sellAmount = parseNumber(document.getElementById("sellAmount").value);
+      let profit = document.getElementById("profit").value.trim();
+      const notes = document.getElementById("notes").value.trim() || "—";
+
+      if (!token || !timestamp || isNaN(invested)) {
+        alert("Token, Timestamp, and Invested are required.");
+        return;
+      }
+      let profitNum = parseNumber(profit);
+      if (isNaN(profitNum)) {
+        if (!isNaN(sellAmount)) {
+          profitNum = +(sellAmount - invested).toFixed(2);
+        } else {
+          alert("Provide either Profit (Net) or Sell Amount to compute it.");
+          return;
+        }
+      }
+
+      const trade = { timestamp, token, invested: +invested.toFixed(2), profit: +profitNum.toFixed(2), notes };
+      state.trades.push(trade);
+      updateCurrentIterationWithTrade(trade);
+
+      if (document.getElementById("persistToggle")?.checked) saveState(state);
+      refreshAll();
+      document.getElementById("timestamp").value = "";
+      document.getElementById("invested").value = "";
+      document.getElementById("sellAmount").value = "";
+      document.getElementById("profit").value = "";
+      document.getElementById("notes").value = "";
+    }
+
+    function finalizeIteration() {
+      const cur = currentIter();
+      if (cur.remainingInvest > 0) return;
+      const nextIterNum = cur.iteration + 1;
+      const nextExpected = +(cur.expected + cur.actualNet).toFixed(2);
+      const next = {
+        iteration: nextIterNum,
+        expected: nextExpected,
+        expectedNet: +(nextExpected * 0.01).toFixed(2),
+        remainingInvest: +nextExpected.toFixed(2),
+        actualNet: 0.00,
+        timeFrame: "",
+        tokens: ""
+      };
+      state.iterations.unshift(next);
+      saveState(state);
+      refreshAll();
+      alert("Iteration finalized. Next iteration #" + nextIterNum + " created with expected " + fmtUSD(nextExpected) + ".");
+    }
+
+    document.getElementById("search").addEventListener("input", (e) => renderTrades(e.target.value));
+    document.getElementById("parseBtn").addEventListener("click", () => fillForm(parsePastedSummary(document.getElementById("pasteInput").value)));
+    document.getElementById("clearPasteBtn").addEventListener("click", () => { document.getElementById("pasteInput").value = ""; fillForm({}); });
+    document.getElementById("addTradeBtn").addEventListener("click", addTradeFromForm);
+    document.getElementById("finalizeBtn").addEventListener("click", finalizeIteration);
+
+    function download(filename, text) {
+      const a = document.createElement('a');
+      a.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+      a.setAttribute('download', filename);
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    function toCSV(arr, columns) {
+      const header = columns.join(",");
+      const rows = arr.map(o => columns.map(c => {
+        const val = o[c] ?? "";
+        if (typeof val === "string" && (val.includes(",") || val.includes("\"))) {
+          return '"' + val.replace(/"/g, '""') + '"';
+        }
+        return val;
+      }).join(","));
+      return [header, ...rows].join("\n");
+    }
+    document.getElementById("downloadJson").addEventListener("click", () => {
+      download("compounding-data.json", JSON.stringify({ iterations: state.iterations, trades: state.trades }, null, 2));
+    });
+    document.getElementById("downloadCsv").addEventListener("click", () => {
+      const itersCsv = toCSV(state.iterations, ["iteration","expected","expectedNet","remainingInvest","actualNet","timeFrame","tokens"]);
+      const tradesCsv = toCSV(state.trades, ["timestamp","token","invested","profit","notes"]);
+      download("compounding-iterations.csv", itersCsv);
+      setTimeout(() => download("compounding-trades.csv", tradesCsv), 200);
+    });
+
+    refreshAll();
+  </script>
+</body>
+</html>
